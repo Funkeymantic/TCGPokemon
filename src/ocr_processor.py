@@ -94,20 +94,49 @@ class OCRProcessor:
         # Split text into lines
         lines = text.strip().split('\n')
 
-        # The card name is typically one of the first lines
-        # and is usually capitalized
-        for line in lines[:5]:  # Check first 5 lines
+        # Try multiple strategies to extract the card name
+        candidates = []
+
+        # Strategy 1: First meaningful line (most common)
+        for line in lines[:7]:  # Check first 7 lines
             line = line.strip()
             # Remove common OCR artifacts
             cleaned = re.sub(r'[^a-zA-Z0-9\s\-\'\.]', '', line)
             cleaned = cleaned.strip()
 
-            # Card name should be at least 3 characters
-            if len(cleaned) >= 3:
+            # Card name should be at least 2 characters (more lenient)
+            if len(cleaned) >= 2:
                 # Check if it's mostly alphabetic (card names)
-                alpha_ratio = sum(c.isalpha() for c in cleaned) / len(cleaned)
-                if alpha_ratio > 0.5:
-                    return cleaned
+                alpha_ratio = sum(c.isalpha() for c in cleaned) / len(cleaned) if len(cleaned) > 0 else 0
+                if alpha_ratio > 0.4:  # Lower threshold - was 0.5
+                    candidates.append((cleaned, alpha_ratio, 1))  # (name, alpha_ratio, priority)
+
+        # Strategy 2: Longest alphabetic sequence
+        all_words = ' '.join(lines).split()
+        for word in all_words:
+            cleaned = re.sub(r'[^a-zA-Z0-9\s\-\']', '', word).strip()
+            if len(cleaned) >= 3:
+                alpha_ratio = sum(c.isalpha() for c in cleaned) / len(cleaned) if len(cleaned) > 0 else 0
+                if alpha_ratio > 0.6:
+                    candidates.append((cleaned, alpha_ratio, 2))
+
+        # Strategy 3: Look for capitalized words (Pokemon names are often capitalized)
+        for line in lines[:10]:
+            words = line.split()
+            for word in words:
+                if word and word[0].isupper() and len(word) >= 3:
+                    cleaned = re.sub(r'[^a-zA-Z0-9\-\']', '', word).strip()
+                    if len(cleaned) >= 3:
+                        alpha_ratio = sum(c.isalpha() for c in cleaned) / len(cleaned) if len(cleaned) > 0 else 0
+                        candidates.append((cleaned, alpha_ratio, 3))
+
+        # Return the best candidate (prioritize by priority, then alpha_ratio, then length)
+        if candidates:
+            # Sort by: priority (lower is better), then alpha_ratio (higher is better), then length
+            candidates.sort(key=lambda x: (x[2], -x[1], -len(x[0])))
+            best_name = candidates[0][0]
+            print(f"[OCR] Extracted card name: '{best_name}' (from {len(candidates)} candidates)")
+            return best_name
 
         return None
 
