@@ -74,7 +74,7 @@ class PokemonCardScannerApp:
         camera_label = ttk.Label(left_panel, text="Camera View", font=('Arial', 12, 'bold'))
         camera_label.pack(pady=(0, 5))
 
-        self.camera_canvas = tk.Canvas(left_panel, width=640, height=480, bg='black')
+        self.camera_canvas = tk.Canvas(left_panel, width=640, height=360, bg='black')
         self.camera_canvas.pack()
 
         # Camera controls
@@ -182,8 +182,8 @@ class PokemonCardScannerApp:
                 self.current_frame = frame
                 # Convert to RGB for display
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # Resize to fit canvas
-                rgb_frame = cv2.resize(rgb_frame, (640, 480))
+                # Resize to fit canvas (16:9 aspect ratio)
+                rgb_frame = cv2.resize(rgb_frame, (640, 360))
                 # Convert to PIL Image
                 img = Image.fromarray(rgb_frame)
                 # Convert to ImageTk
@@ -299,8 +299,17 @@ class PokemonCardScannerApp:
             self.root.after(0, self._display_search_results, cards)
 
         except Exception as e:
-            self.root.after(0, self.update_status, f"API Error: {str(e)}", "red")
-            self.root.after(0, messagebox.showerror, "API Error", f"Error searching API: {str(e)}")
+            # Handle bytes error messages from SDK
+            error_msg = str(e) if not isinstance(e, bytes) else e.decode('utf-8', errors='replace')
+            # If str(e) fails, get a simpler error message
+            try:
+                error_display = str(e)
+            except:
+                error_display = f"{type(e).__name__}: {repr(e)}"
+
+            self.root.after(0, self.update_status, f"API Error", "red")
+            self.root.after(0, messagebox.showerror, "API Error",
+                          f"Error searching API. Please check your internet connection.\n\nTechnical details: {error_display}")
 
     def _display_search_results(self, cards: List):
         """
