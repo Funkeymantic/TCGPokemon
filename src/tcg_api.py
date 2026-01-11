@@ -5,6 +5,7 @@ Handles all interactions with the Pokemon TCG API
 
 import os
 import time
+import requests
 from typing import Optional, List, Dict, Any
 from pokemontcgsdk import Card, RestClient
 from dotenv import load_dotenv
@@ -23,6 +24,43 @@ class TCGAPIClient:
             print("✓ API key configured")
         else:
             print("⚠ No API key found. Using default rate limits.")
+
+        # Check API health on initialization
+        self.check_api_health()
+
+    def check_api_health(self, timeout: int = 5) -> bool:
+        """
+        Check if the Pokemon TCG API is responding
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            True if API is healthy, False otherwise
+        """
+        try:
+            print("Checking Pokemon TCG API health...", end=" ")
+            response = requests.get(
+                "https://api.pokemontcg.io/v2/cards",
+                params={"pageSize": "1"},
+                timeout=timeout
+            )
+
+            if response.status_code == 200:
+                print("✓ API is online and responding")
+                return True
+            else:
+                print(f"⚠ API returned status code: {response.status_code}")
+                return False
+        except requests.exceptions.Timeout:
+            print("✗ API health check timed out (API may be slow or down)")
+            return False
+        except requests.exceptions.ConnectionError:
+            print("✗ Cannot connect to API (check internet connection)")
+            return False
+        except Exception as e:
+            print(f"✗ API health check failed: {e}")
+            return False
 
     def search_card_by_name(self, card_name: str, set_name: Optional[str] = None, max_retries: int = 3) -> List[Card]:
         """
