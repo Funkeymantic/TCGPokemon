@@ -39,9 +39,14 @@ class TCGAPIClient:
             if set_name:
                 query += f' set.name:"{set_name}"'
 
+            print(f"Searching API with query: {query}")
             cards = Card.where(q=query)
+            print(f"API returned response, converting to list...")
+
             # Convert to list to handle SDK response properly
-            return list(cards) if cards else []
+            cards_list = list(cards) if cards else []
+            print(f"Found {len(cards_list)} cards")
+            return cards_list
         except Exception as e:
             # Better error handling for bytes/string errors
             try:
@@ -49,6 +54,8 @@ class TCGAPIClient:
             except:
                 error_msg = repr(e)
             print(f"Error searching for card: {error_msg}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def search_card_fuzzy(self, card_name: str) -> List[Card]:
@@ -63,9 +70,14 @@ class TCGAPIClient:
         """
         try:
             query = f'name:{card_name}*'
+            print(f"Fuzzy searching API with query: {query}")
             cards = Card.where(q=query, pageSize=20)
+            print(f"API returned response, converting to list...")
+
             # Convert to list to handle SDK response properly
-            return list(cards) if cards else []
+            cards_list = list(cards) if cards else []
+            print(f"Found {len(cards_list)} cards")
+            return cards_list
         except Exception as e:
             # Better error handling for bytes/string errors
             try:
@@ -73,6 +85,8 @@ class TCGAPIClient:
             except:
                 error_msg = repr(e)
             print(f"Error in fuzzy search: {error_msg}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def get_card_by_id(self, card_id: str) -> Optional[Card]:
