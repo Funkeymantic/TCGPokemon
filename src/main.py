@@ -299,8 +299,17 @@ class PokemonCardScannerApp:
             self.root.after(0, self._display_search_results, cards)
 
         except Exception as e:
-            self.root.after(0, self.update_status, f"API Error: {str(e)}", "red")
-            self.root.after(0, messagebox.showerror, "API Error", f"Error searching API: {str(e)}")
+            # Handle bytes error messages from SDK
+            error_msg = str(e) if not isinstance(e, bytes) else e.decode('utf-8', errors='replace')
+            # If str(e) fails, get a simpler error message
+            try:
+                error_display = str(e)
+            except:
+                error_display = f"{type(e).__name__}: {repr(e)}"
+
+            self.root.after(0, self.update_status, f"API Error", "red")
+            self.root.after(0, messagebox.showerror, "API Error",
+                          f"Error searching API. Please check your internet connection.\n\nTechnical details: {error_display}")
 
     def _display_search_results(self, cards: List):
         """
