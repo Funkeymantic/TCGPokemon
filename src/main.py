@@ -22,6 +22,7 @@ from ocr_processor import OCRProcessor
 from tcg_api import TCGAPIClient
 from card_display import CardDisplay
 from file_manager import FileManager
+from learning_system import LearningSystem
 
 
 class PokemonCardScannerApp:
@@ -43,12 +44,14 @@ class PokemonCardScannerApp:
         self.ocr = OCRProcessor()
         self.api = TCGAPIClient()
         self.file_manager = FileManager()
+        self.learning = LearningSystem()
 
         # State
         self.camera_running = False
         self.current_frame = None
         self.selected_card = None
         self.search_results = []
+        self.last_ocr_text = None  # Track last OCR text for corrections
 
         # Setup UI
         self.setup_ui()
@@ -58,6 +61,18 @@ class PokemonCardScannerApp:
 
     def setup_ui(self):
         """Setup the user interface"""
+        # Menu bar
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        # Learning menu
+        learning_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Learning", menu=learning_menu)
+        learning_menu.add_command(label="View Statistics", command=self.show_statistics)
+        learning_menu.add_command(label="Build Card Cache", command=self.build_card_cache)
+        learning_menu.add_separator()
+        learning_menu.add_command(label="Correct Last Scan", command=self.show_correction_dialog)
+
         # Main container
         main_container = ttk.Frame(self.root, padding="10")
         main_container.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -266,26 +281,46 @@ class PokemonCardScannerApp:
             # Extract text (with better Tesseract config)
             text = self.ocr.extract_text(preprocessed)
             print(f"OCR extracted text: '{text}'")
+            self.last_ocr_text = text  # Save for potential corrections
 
             if not text:
                 self.root.after(0, self.update_status, "No text detected", "orange")
                 self.root.after(0, messagebox.showwarning, "Warning",
                               "Could not extract text from the image. Try adjusting the card position.")
+                self.learning.record_scan_stat('ocr', None, False)
                 return
 
             # Extract card info
             card_info = self.ocr.extract_pokemon_info(text)
             card_name = card_info.get('name')
 
+            # Try to improve card name using learning system
+            if not card_name:
+                # Check learned patterns
+                learned_name = self.learning.get_learned_card_name(text)
+                if learned_name:
+                    card_name = learned_name
+                    self.root.after(0, self.update_status, f"Using learned pattern: {card_name}", "blue")
+
+            # Try fuzzy matching with cached cards
+            if not card_name and self.learning.get_cache_size() > 0:
+                matches = self.learning.fuzzy_match_card_name(text)
+                if matches:
+                    card_name = matches[0][0]  # Use best match
+                    confidence = matches[0][1]
+                    self.root.after(0, self.update_status,
+                                  f"Fuzzy match: {card_name} ({confidence*100:.0f}%)", "blue")
+
             if not card_name:
                 self.root.after(0, self.update_status, "Could not identify card name", "orange")
                 self.root.after(0, messagebox.showwarning, "Warning",
-                              f"Could not identify card name. OCR Text:\n{text[:200]}")
+                              f"Could not identify card name. OCR Text:\n{text[:200]}\n\nUse 'Learning > Correct Last Scan' to teach the system.")
+                self.learning.record_scan_stat('ocr', None, False)
                 return
 
             # Search API
             self.root.after(0, self.update_status, f"Searching for: {card_name}", "blue")
-            self._search_api(card_name)
+            self._search_api(card_name, ocr_text=text)
 
         except Exception as e:
             self.root.after(0, self.update_status, f"Error: {str(e)}", "red")
@@ -299,18 +334,20 @@ class PokemonCardScannerApp:
             return
 
         self.update_status(f"Searching for: {card_name}", "blue")
+        self.last_ocr_text = None  # Clear OCR text for manual searches
 
         # Search in background thread
         thread = threading.Thread(target=self._search_api, args=(card_name,))
         thread.daemon = True
         thread.start()
 
-    def _search_api(self, card_name: str):
+    def _search_api(self, card_name: str, ocr_text: str = None):
         """
         Search for card using API (runs in background thread)
 
         Args:
             card_name: Name of the card to search
+            ocr_text: Optional OCR text that was used to extract the card name
         """
         try:
             # Try exact search first
@@ -324,7 +361,23 @@ class PokemonCardScannerApp:
                 self.root.after(0, self.update_status, "No cards found", "orange")
                 self.root.after(0, messagebox.showinfo, "No Results",
                               f"No cards found for '{card_name}'")
+                # Record failed search
+                scan_type = 'ocr' if ocr_text else 'manual'
+                self.learning.record_scan_stat(scan_type, card_name, False)
                 return
+
+            # Cache the found cards
+            cards_info = [self.api.extract_card_info(card) for card in cards]
+            self.learning.cache_multiple_cards(cards_info)
+
+            # If OCR was used, record the pattern
+            if ocr_text and cards:
+                first_card_name = cards[0].name
+                self.learning.record_ocr_pattern(ocr_text, first_card_name, True)
+
+            # Record successful search
+            scan_type = 'ocr' if ocr_text else 'manual'
+            self.learning.record_scan_stat(scan_type, card_name, True)
 
             # Update UI with results
             self.root.after(0, self._display_search_results, cards)
@@ -497,6 +550,165 @@ class PokemonCardScannerApp:
             color: Color of the text
         """
         self.status_label.config(text=f"Status: {message}", foreground=color)
+
+    def show_statistics(self):
+        """Show learning system statistics"""
+        stats_text = self.learning.export_statistics()
+
+        # Create statistics window
+        stats_window = tk.Toplevel(self.root)
+        stats_window.title("Learning System Statistics")
+        stats_window.geometry("400x300")
+
+        # Statistics text
+        stats_display = scrolledtext.ScrolledText(stats_window, height=15, font=('Courier', 10))
+        stats_display.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        stats_display.insert(1.0, stats_text)
+        stats_display.config(state=tk.DISABLED)
+
+        # Close button
+        close_btn = ttk.Button(stats_window, text="Close", command=stats_window.destroy)
+        close_btn.pack(pady=5)
+
+    def build_card_cache(self):
+        """Build card cache by fetching popular cards from API"""
+        if not messagebox.askyesno("Build Card Cache",
+                                   "This will fetch and cache Pokemon cards from the API to improve fuzzy matching.\n\n"
+                                   "This may take a minute. Continue?"):
+            return
+
+        self.update_status("Building card cache...", "blue")
+
+        def _build_cache():
+            try:
+                # Fetch some cards to populate cache
+                # We'll search for common Pokemon names
+                common_pokemon = [
+                    "Pikachu", "Charizard", "Mewtwo", "Blastoise", "Venusaur",
+                    "Gengar", "Dragonite", "Snorlax", "Eevee", "Gyarados",
+                    "Alakazam", "Machamp", "Arcanine", "Lapras", "Articuno",
+                    "Zapdos", "Moltres", "Mew", "Lugia", "Ho-Oh"
+                ]
+
+                cached_count = 0
+                for pokemon in common_pokemon:
+                    try:
+                        cards = self.api.search_card_by_name(pokemon)
+                        if cards:
+                            cards_info = [self.api.extract_card_info(card) for card in cards[:10]]  # Limit to 10 per name
+                            self.learning.cache_multiple_cards(cards_info)
+                            cached_count += len(cards_info)
+                    except:
+                        pass  # Skip errors for individual Pokemon
+
+                self.root.after(0, self.update_status, f"Cache built: {cached_count} cards", "green")
+                self.root.after(0, messagebox.showinfo, "Success",
+                              f"Successfully cached {cached_count} cards!\n\n"
+                              f"The scanner will now use fuzzy matching to improve accuracy.")
+
+            except Exception as e:
+                self.root.after(0, self.update_status, "Cache build failed", "red")
+                self.root.after(0, messagebox.showerror, "Error",
+                              f"Failed to build cache: {str(e)}")
+
+        # Run in background
+        thread = threading.Thread(target=_build_cache)
+        thread.daemon = True
+        thread.start()
+
+    def show_correction_dialog(self):
+        """Show dialog to correct the last OCR scan"""
+        if not self.last_ocr_text:
+            messagebox.showinfo("No Scan to Correct",
+                              "No recent OCR scan to correct. Scan a card first.")
+            return
+
+        # Create correction dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Correct OCR Scan")
+        dialog.geometry("500x300")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # OCR text display
+        ttk.Label(dialog, text="OCR Text:", font=('Arial', 10, 'bold')).pack(pady=(10, 5))
+        ocr_display = scrolledtext.ScrolledText(dialog, height=5, font=('Courier', 9))
+        ocr_display.pack(fill=tk.X, padx=10, pady=5)
+        ocr_display.insert(1.0, self.last_ocr_text)
+        ocr_display.config(state=tk.DISABLED)
+
+        # Correction input
+        ttk.Label(dialog, text="Correct Card Name:", font=('Arial', 10, 'bold')).pack(pady=(10, 5))
+        correction_entry = ttk.Entry(dialog, width=40, font=('Arial', 10))
+        correction_entry.pack(padx=10, pady=5)
+        correction_entry.focus()
+
+        # Suggestion from fuzzy matching
+        if self.learning.get_cache_size() > 0:
+            matches = self.learning.fuzzy_match_card_name(self.last_ocr_text, threshold=0.4)
+            if matches:
+                ttk.Label(dialog, text="Suggestions:", font=('Arial', 9)).pack(pady=(10, 5))
+
+                suggestions_frame = ttk.Frame(dialog)
+                suggestions_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+                suggestions_list = tk.Listbox(suggestions_frame, height=5)
+                suggestions_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+                scrollbar = ttk.Scrollbar(suggestions_frame, orient=tk.VERTICAL,
+                                        command=suggestions_list.yview)
+                scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                suggestions_list.config(yscrollcommand=scrollbar.set)
+
+                for name, score in matches[:10]:
+                    suggestions_list.insert(tk.END, f"{name} ({score*100:.0f}%)")
+
+                def use_suggestion(event=None):
+                    selection = suggestions_list.curselection()
+                    if selection:
+                        text = suggestions_list.get(selection[0])
+                        card_name = text.split(' (')[0]  # Extract name before score
+                        correction_entry.delete(0, tk.END)
+                        correction_entry.insert(0, card_name)
+
+                suggestions_list.bind('<Double-Button-1>', use_suggestion)
+
+        def submit_correction():
+            corrected_name = correction_entry.get().strip()
+            if not corrected_name:
+                messagebox.showwarning("Invalid", "Please enter a card name")
+                return
+
+            # Record the correction
+            self.learning.record_user_correction(self.last_ocr_text, corrected_name)
+            self.learning.record_scan_stat('correction', corrected_name, True)
+
+            messagebox.showinfo("Success",
+                              f"Correction recorded!\n\nThe system will now recognize:\n"
+                              f"'{self.last_ocr_text[:50]}...'\n\nas: {corrected_name}")
+
+            dialog.destroy()
+
+            # Optionally search for the corrected card
+            if messagebox.askyesno("Search", "Would you like to search for this card?"):
+                self.search_entry.delete(0, tk.END)
+                self.search_entry.insert(0, corrected_name)
+                self.manual_search()
+
+        # Buttons
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+
+        submit_btn = ttk.Button(button_frame, text="Submit Correction",
+                               command=submit_correction)
+        submit_btn.grid(row=0, column=0, padx=5)
+
+        cancel_btn = ttk.Button(button_frame, text="Cancel",
+                               command=dialog.destroy)
+        cancel_btn.grid(row=0, column=1, padx=5)
+
+        # Bind Enter key
+        correction_entry.bind('<Return>', lambda e: submit_correction())
 
     def on_closing(self):
         """Handle window closing"""
