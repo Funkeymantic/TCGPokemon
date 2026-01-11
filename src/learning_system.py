@@ -154,38 +154,73 @@ class LearningSystem:
             cursor.execute('SELECT DISTINCT name FROM card_cache ORDER BY name')
             return [row[0] for row in cursor.fetchall()]
 
-    def fuzzy_match_card_name(self, ocr_text: str, threshold: float = 0.6) -> List[Tuple[str, float]]:
+    def fuzzy_match_card_name(self, ocr_text: str, threshold: float = 0.4) -> List[Tuple[str, float]]:
         """
         Perform fuzzy matching against cached card names
 
         Args:
             ocr_text: Text extracted from OCR
-            threshold: Minimum similarity threshold (0.0 to 1.0)
+            threshold: Minimum similarity threshold (0.0 to 1.0) - default lowered to 0.4
 
         Returns:
             List of (card_name, similarity_score) tuples, sorted by score
         """
         cached_names = self.get_cached_card_names()
-        matches = []
+        if not cached_names:
+            return []
 
+        matches = []
         ocr_lower = ocr_text.lower().strip()
+        ocr_words = set(ocr_lower.split())
 
         for name in cached_names:
             name_lower = name.lower()
+            name_words = set(name_lower.split())
 
-            # Calculate similarity
+            # Strategy 1: Sequence similarity
             similarity = SequenceMatcher(None, ocr_lower, name_lower).ratio()
 
-            # Also check if OCR text is contained in the name
-            if ocr_lower in name_lower or name_lower in ocr_lower:
+            # Strategy 2: Substring matching (boost score)
+            if ocr_lower in name_lower:
+                similarity = max(similarity, 0.75)
+            elif name_lower in ocr_lower:
                 similarity = max(similarity, 0.7)
+
+            # Strategy 3: Word overlap (more lenient for multi-word names)
+            if len(ocr_words) > 0 and len(name_words) > 0:
+                common_words = ocr_words & name_words
+                word_overlap = len(common_words) / min(len(ocr_words), len(name_words))
+                similarity = max(similarity, word_overlap * 0.9)
+
+            # Strategy 4: Partial word matching (for OCR errors)
+            partial_matches = 0
+            for ocr_word in ocr_words:
+                for name_word in name_words:
+                    if len(ocr_word) >= 3 and len(name_word) >= 3:
+                        # Check if words are similar enough
+                        word_sim = SequenceMatcher(None, ocr_word, name_word).ratio()
+                        if word_sim > 0.7:
+                            partial_matches += 1
+                            break
+
+            if partial_matches > 0:
+                partial_score = partial_matches / max(len(ocr_words), 1)
+                similarity = max(similarity, partial_score * 0.8)
+
+            # Strategy 5: Starting characters match (common for OCR to get beginning right)
+            if len(ocr_lower) >= 3 and len(name_lower) >= 3:
+                if ocr_lower[:3] == name_lower[:3]:
+                    similarity = max(similarity, 0.6)
 
             if similarity >= threshold:
                 matches.append((name, similarity))
 
         # Sort by similarity score (highest first)
         matches.sort(key=lambda x: x[1], reverse=True)
-        return matches[:10]  # Return top 10 matches
+        print(f"[Fuzzy Match] Found {len(matches)} matches for '{ocr_text[:30]}...' (threshold: {threshold})")
+        if matches:
+            print(f"[Fuzzy Match] Top match: '{matches[0][0]}' ({matches[0][1]*100:.1f}%)")
+        return matches[:15]  # Return top 15 matches (increased from 10)
 
     def record_ocr_pattern(self, ocr_text: str, actual_card_name: str, success: bool = True):
         """
@@ -254,15 +289,17 @@ class LearningSystem:
             ''', (ocr_text,))
 
             result = cursor.fetchone()
-            if result and result[1] > 0.5:  # Only return if confidence > 50%
+            if result and result[1] > 0.3:  # Lowered from 0.5 to 0.3
+                print(f"[Learned Pattern] Exact match: '{ocr_text}' -> '{result[0]}' ({result[1]*100:.0f}% confidence)")
                 return result[0]
 
             # Try fuzzy matching with learned patterns
             cursor.execute('''
                 SELECT DISTINCT actual_card_name, confidence
                 FROM ocr_patterns
-                WHERE confidence > 0.5
+                WHERE confidence > 0.3
                 ORDER BY confidence DESC, scan_count DESC
+                LIMIT 100
             ''')
 
             learned_names = cursor.fetchall()
@@ -270,13 +307,33 @@ class LearningSystem:
             best_score = 0.0
 
             ocr_lower = ocr_text.lower()
+            ocr_words = set(ocr_lower.split())
+
             for name, confidence in learned_names:
-                similarity = SequenceMatcher(None, ocr_lower, name.lower()).ratio()
+                name_lower = name.lower()
+                name_words = set(name_lower.split())
+
+                # Multiple similarity strategies
+                similarity = SequenceMatcher(None, ocr_lower, name_lower).ratio()
+
+                # Word overlap
+                if ocr_words and name_words:
+                    common_words = ocr_words & name_words
+                    word_overlap = len(common_words) / max(len(ocr_words), 1)
+                    similarity = max(similarity, word_overlap)
+
+                # Substring match
+                if ocr_lower in name_lower or name_lower in ocr_lower:
+                    similarity = max(similarity, 0.75)
+
                 score = similarity * confidence  # Weighted by confidence
 
-                if score > best_score and score > 0.7:
+                if score > best_score and score > 0.4:  # Lowered from 0.7 to 0.4
                     best_score = score
                     best_match = name
+
+            if best_match:
+                print(f"[Learned Pattern] Fuzzy match: '{ocr_text[:30]}...' -> '{best_match}' (score: {best_score:.2f})")
 
             return best_match
 

@@ -280,7 +280,10 @@ class PokemonCardScannerApp:
 
             # Extract text (with better Tesseract config)
             text = self.ocr.extract_text(preprocessed)
-            print(f"OCR extracted text: '{text}'")
+            print(f"\n{'='*60}")
+            print(f"[OCR] Raw extracted text:")
+            print(f"{text}")
+            print(f"{'='*60}\n")
             self.last_ocr_text = text  # Save for potential corrections
 
             if not text:
@@ -293,6 +296,7 @@ class PokemonCardScannerApp:
             # Extract card info
             card_info = self.ocr.extract_pokemon_info(text)
             card_name = card_info.get('name')
+            print(f"[Main] Extracted card name from OCR: '{card_name}'")
 
             # Try to improve card name using learning system
             if not card_name:
@@ -303,18 +307,38 @@ class PokemonCardScannerApp:
                     self.root.after(0, self.update_status, f"Using learned pattern: {card_name}", "blue")
 
             # Try fuzzy matching with cached cards
-            if not card_name and self.learning.get_cache_size() > 0:
-                matches = self.learning.fuzzy_match_card_name(text)
-                if matches:
-                    card_name = matches[0][0]  # Use best match
-                    confidence = matches[0][1]
-                    self.root.after(0, self.update_status,
-                                  f"Fuzzy match: {card_name} ({confidence*100:.0f}%)", "blue")
+            if not card_name:
+                cache_size = self.learning.get_cache_size()
+                if cache_size > 0:
+                    print(f"[Main] Trying fuzzy match with cache size: {cache_size}")
+                    matches = self.learning.fuzzy_match_card_name(text, threshold=0.3)  # Lower threshold
+                    if matches:
+                        card_name = matches[0][0]  # Use best match
+                        confidence = matches[0][1]
+                        print(f"[Main] Using fuzzy match: {card_name} ({confidence*100:.0f}%)")
+                        self.root.after(0, self.update_status,
+                                      f"Fuzzy match: {card_name} ({confidence*100:.0f}%)", "blue")
+                    else:
+                        print(f"[Main] No fuzzy matches found")
+                else:
+                    print(f"[Main] Card cache is empty - fuzzy matching unavailable")
 
             if not card_name:
+                cache_size = self.learning.get_cache_size()
                 self.root.after(0, self.update_status, "Could not identify card name", "orange")
-                self.root.after(0, messagebox.showwarning, "Warning",
-                              f"Could not identify card name. OCR Text:\n{text[:200]}\n\nUse 'Learning > Correct Last Scan' to teach the system.")
+
+                # Suggest building cache if it's empty
+                if cache_size == 0:
+                    msg = (f"Could not identify card name. OCR Text:\n{text[:200]}\n\n"
+                          "💡 TIP: Build the card cache first!\n"
+                          "Go to 'Learning > Build Card Cache' to enable smart fuzzy matching.\n\n"
+                          "Or use 'Learning > Correct Last Scan' to teach the system this card.")
+                else:
+                    msg = (f"Could not identify card name. OCR Text:\n{text[:200]}\n\n"
+                          f"Card cache has {cache_size} cards but no match found.\n"
+                          "Use 'Learning > Correct Last Scan' to teach the system.")
+
+                self.root.after(0, messagebox.showwarning, "Warning", msg)
                 self.learning.record_scan_stat('ocr', None, False)
                 return
 
@@ -645,7 +669,7 @@ class PokemonCardScannerApp:
 
         # Suggestion from fuzzy matching
         if self.learning.get_cache_size() > 0:
-            matches = self.learning.fuzzy_match_card_name(self.last_ocr_text, threshold=0.4)
+            matches = self.learning.fuzzy_match_card_name(self.last_ocr_text, threshold=0.3)
             if matches:
                 ttk.Label(dialog, text="Suggestions:", font=('Arial', 9)).pack(pady=(10, 5))
 
