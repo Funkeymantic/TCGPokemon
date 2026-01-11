@@ -4,6 +4,7 @@ A comprehensive Pokemon Trading Card Game (TCG) scanner that uses your camera to
 
 ## Features
 
+### Core Scanning
 - 📷 **Camera Integration**: Real-time camera feed for scanning physical Pokemon cards
 - 🔍 **OCR Text Extraction**: Automatic text recognition from card images using Tesseract
 - 🌐 **TCG API Integration**: Fetches comprehensive card data from the official Pokemon TCG API
@@ -12,6 +13,17 @@ A comprehensive Pokemon Trading Card Game (TCG) scanner that uses your camera to
 - 💾 **File Management**: Saves card data in multiple formats (JSON, TXT) with images
 - 🖥️ **Dual Interface**: Both GUI and command-line interfaces available
 - 🔎 **Manual Search**: Search for cards by name even without scanning
+
+### 🧠 **Intelligent Learning System** (NEW!)
+- **Auto-Improving Accuracy**: Gets smarter with every scan
+- **Card Name Caching**: Builds local database of Pokemon cards for instant fuzzy matching
+- **OCR Pattern Learning**: Remembers successful scans and reuses patterns
+- **User Corrections**: One-time corrections permanently teach the system
+- **Fuzzy Matching**: Finds cards even when OCR isn't perfect (40% similarity threshold)
+- **Statistics Tracking**: Monitor success rate and learning progress
+- **Multiple Matching Strategies**: 5 different algorithms to find the right card
+
+**See [LEARNING_SYSTEM.md](LEARNING_SYSTEM.md) for complete details.**
 
 ## API Documentation
 
@@ -74,6 +86,26 @@ POKEMONTCG_IO_API_KEY=your_api_key_here
 
 ## Usage
 
+### Quick Start with Learning System 🚀
+
+**For best results, do this FIRST:**
+
+```bash
+# 1. Run diagnostic to check setup
+python diagnostic.py
+
+# 2. Start the scanner
+python src/main.py
+
+# 3. Build the card cache (ONE TIME SETUP)
+#    In the app: Learning > Build Card Cache
+#    Wait ~1 minute for 200+ cards to be cached
+
+# 4. Start scanning!
+```
+
+**Why build the cache?** It enables intelligent fuzzy matching, making the scanner much more accurate even when OCR isn't perfect.
+
 ### GUI Application
 
 Run the graphical interface:
@@ -85,9 +117,14 @@ python src/main.py
 1. **Start Camera**: Begin camera feed
 2. **Capture & Scan**: Take a picture and automatically scan for card information
 3. **Manual Search**: Search for cards by typing the name
-4. **View Results**: See all matching cards in the results list
-5. **Select Card**: Click on a result to view detailed information
-6. **Save Data**: Save all card information to files
+4. **Learning Menu**:
+   - **Build Card Cache**: One-time setup for fuzzy matching (RECOMMENDED!)
+   - **View Statistics**: See success rate and learning progress
+   - **Correct Last Scan**: Teach the system when OCR fails
+5. **View Results**: See all matching cards in the results list
+6. **Filter Results**: Search through results with the filter box
+7. **Select Card**: Click on a result to view detailed information and card image
+8. **Save Data**: Save all card information to files
 
 ### Command-Line Interface
 
@@ -209,6 +246,34 @@ This project is for educational and personal use. Pokemon and related trademarks
 - [Pokemon TCG API](https://pokemontcg.io/) for providing the card database
 - [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for text recognition
 - The Pokemon community for their support
+
+## Troubleshooting
+
+### Card Recognition Not Working?
+
+**Run the diagnostic first:**
+```bash
+python diagnostic.py
+```
+
+Common issues and solutions:
+
+| Problem | Solution |
+|---------|----------|
+| ❌ "Cannot get cards right" | **Build the card cache!** Learning > Build Card Cache |
+| ❌ "No text detected" | Improve lighting, focus, or check Tesseract installation |
+| ❌ "No cards found" | Use "Learning > Correct Last Scan" to teach the system |
+| ⚠️ Low accuracy | Build cache + correct a few scans = system learns quickly |
+| 📉 Success rate < 50% | Cache size is probably 0 - build it! |
+
+**See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for complete guide.**
+
+### Quick Tips
+
+1. **First time user?** Build the card cache before scanning (Learning > Build Card Cache)
+2. **OCR failing?** Use Learning > Correct Last Scan - one correction teaches the system forever
+3. **Want better accuracy?** Good lighting + focused camera + card cache = 90%+ success rate
+4. **Monitoring progress?** Check Learning > View Statistics to see improvement
 
 ## Support
 
