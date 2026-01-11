@@ -52,7 +52,7 @@ def main():
                 continue
 
             # Display frame
-            display_frame = cv2.resize(frame, (800, 600))
+            display_frame = cv2.resize(frame, (2560, 1440))
             cv2.putText(display_frame, "Press SPACE to capture | 'q' to quit | 's' to search",
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             cv2.imshow('Pokemon Card Scanner', display_frame)
