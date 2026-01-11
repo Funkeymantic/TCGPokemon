@@ -95,16 +95,30 @@ class CameraCapture:
         # Convert to grayscale
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-        # Apply adaptive thresholding for better text contrast
-        processed = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY, 11, 2
-        )
+        # Increase contrast using CLAHE
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
 
-        # Denoise
-        denoised = cv2.fastNlMeansDenoising(processed, None, 10, 7, 21)
+        # Denoise first
+        denoised = cv2.fastNlMeansDenoising(enhanced, None, 10, 7, 21)
 
-        return denoised
+        # Apply bilateral filter to preserve edges while smoothing
+        bilateral = cv2.bilateralFilter(denoised, 9, 75, 75)
+
+        # Sharpen the image
+        kernel_sharpen = np.array([[-1, -1, -1],
+                                   [-1,  9, -1],
+                                   [-1, -1, -1]])
+        sharpened = cv2.filter2D(bilateral, -1, kernel_sharpen)
+
+        # Apply Otsu's thresholding for better text separation
+        _, thresh = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        # Dilate slightly to make text thicker and more readable
+        kernel = np.ones((2, 2), np.uint8)
+        dilated = cv2.dilate(thresh, kernel, iterations=1)
+
+        return dilated
 
     def detect_card_region(self, image: np.ndarray) -> Optional[np.ndarray]:
         """
@@ -158,6 +172,21 @@ class CameraCapture:
         except Exception as e:
             print(f"Error detecting card region: {e}")
             return image
+
+    def extract_name_region(self, image: np.ndarray) -> np.ndarray:
+        """
+        Extract the top portion of the card where the name typically appears
+
+        Args:
+            image: Full card image
+
+        Returns:
+            Cropped region with card name
+        """
+        height, width = image.shape[:2]
+        # Card name is typically in the top 25% of the card
+        name_region = image[0:int(height * 0.25), 0:width]
+        return name_region
 
     def enhance_image(self, image: np.ndarray) -> np.ndarray:
         """
