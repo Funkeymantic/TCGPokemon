@@ -55,9 +55,28 @@ class OCRProcessor:
             else:
                 pil_image = image
 
-            # Use pytesseract to extract text
-            text = pytesseract.image_to_string(pil_image, config='--psm 6')
-            return text.strip()
+            # Try multiple PSM modes for better results
+            # PSM 6: Assume a single uniform block of text
+            # PSM 11: Sparse text. Find as much text as possible in no particular order
+            # PSM 3: Fully automatic page segmentation
+
+            best_text = ""
+            max_length = 0
+
+            for psm in [11, 6, 3]:
+                try:
+                    text = pytesseract.image_to_string(
+                        pil_image,
+                        config=f'--psm {psm} -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789- '
+                    )
+                    # Keep the longest/best result
+                    if len(text.strip()) > max_length:
+                        best_text = text
+                        max_length = len(text.strip())
+                except:
+                    continue
+
+            return best_text.strip()
         except Exception as e:
             print(f"Error extracting text: {e}")
             return ""

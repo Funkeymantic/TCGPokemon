@@ -10,6 +10,8 @@ from tkinter import ttk, scrolledtext, messagebox
 import cv2
 from PIL import Image, ImageTk
 import threading
+import requests
+from io import BytesIO
 from typing import Optional, List
 
 # Add src directory to path
@@ -111,16 +113,30 @@ class PokemonCardScannerApp:
         right_panel = ttk.Frame(main_container)
         right_panel.grid(row=0, column=1, rowspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         right_panel.columnconfigure(0, weight=1)
-        right_panel.rowconfigure(1, weight=1)
+        right_panel.rowconfigure(2, weight=1)  # Results listbox row
+        right_panel.rowconfigure(4, weight=1)  # Card info row
 
         # Search results
         results_label = ttk.Label(right_panel, text="Search Results",
                                   font=('Arial', 12, 'bold'))
         results_label.grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
 
+        # Filter box for results
+        filter_frame = ttk.Frame(right_panel)
+        filter_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        ttk.Label(filter_frame, text="Filter:").pack(side=tk.LEFT, padx=(0, 5))
+        self.filter_entry = ttk.Entry(filter_frame, width=30)
+        self.filter_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.filter_entry.bind('<KeyRelease>', self.filter_results)
+
+        clear_filter_btn = ttk.Button(filter_frame, text="Clear", width=8,
+                                      command=self.clear_filter)
+        clear_filter_btn.pack(side=tk.LEFT, padx=(5, 0))
+
         # Results listbox
         results_frame = ttk.Frame(right_panel)
-        results_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        results_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         results_frame.columnconfigure(0, weight=1)
         results_frame.rowconfigure(0, weight=1)
 
@@ -136,15 +152,26 @@ class PokemonCardScannerApp:
         # Card information display
         info_label = ttk.Label(right_panel, text="Card Information",
                               font=('Arial', 12, 'bold'))
-        info_label.grid(row=2, column=0, sticky=tk.W, pady=(10, 5))
+        info_label.grid(row=3, column=0, sticky=tk.W, pady=(10, 5))
 
-        self.info_text = scrolledtext.ScrolledText(right_panel, height=25,
+        # Container for image and text side by side
+        info_container = ttk.Frame(right_panel)
+        info_container.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        info_container.columnconfigure(1, weight=1)
+        info_container.rowconfigure(0, weight=1)
+
+        # Card image display
+        self.card_image_label = ttk.Label(info_container, text="")
+        self.card_image_label.grid(row=0, column=0, sticky=(tk.N, tk.W), padx=(0, 10))
+
+        # Card text information
+        self.info_text = scrolledtext.ScrolledText(info_container, height=25,
                                                    font=('Courier', 9), wrap=tk.WORD)
-        self.info_text.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.info_text.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
 
         # Action buttons
         action_frame = ttk.Frame(right_panel)
-        action_frame.grid(row=4, column=0, pady=10)
+        action_frame.grid(row=5, column=0, pady=10)
 
         self.save_btn = ttk.Button(action_frame, text="Save Card Data",
                                    command=self.save_card_data, state=tk.DISABLED)
@@ -226,15 +253,19 @@ class PokemonCardScannerApp:
             self.root.after(0, self.update_status, "Detecting card...", "blue")
             card_region = self.camera.detect_card_region(image)
 
-            # Enhance image
-            enhanced = self.camera.enhance_image(card_region)
+            # Extract just the name region (top 25% of card)
+            name_region = self.camera.extract_name_region(card_region)
 
-            # Preprocess for OCR
+            # Enhance image
+            enhanced = self.camera.enhance_image(name_region)
+
+            # Preprocess for OCR (improved preprocessing)
             self.root.after(0, self.update_status, "Extracting text...", "blue")
             preprocessed = self.camera.preprocess_card_image(enhanced)
 
-            # Extract text
+            # Extract text (with better Tesseract config)
             text = self.ocr.extract_text(preprocessed)
+            print(f"OCR extracted text: '{text}'")
 
             if not text:
                 self.root.after(0, self.update_status, "No text detected", "orange")
@@ -338,8 +369,19 @@ class PokemonCardScannerApp:
         if not selection:
             return
 
-        index = selection[0]
-        card = self.search_results[index]
+        # Get the display text and find matching card
+        display_text = self.results_listbox.get(selection[0])
+
+        # Find the actual card object from search results
+        card = None
+        for c in self.search_results:
+            card_display = f"{c.name} - {c.set.name if hasattr(c, 'set') else 'Unknown'} ({c.id})"
+            if card_display == display_text:
+                card = c
+                break
+
+        if not card:
+            return
 
         # Extract card information
         card_info = self.api.extract_card_info(card)
@@ -350,10 +392,47 @@ class PokemonCardScannerApp:
         self.info_text.delete(1.0, tk.END)
         self.info_text.insert(1.0, display_text)
 
+        # Download and display card image
+        self.display_card_image(card_info)
+
         # Enable save button
         self.save_btn.config(state=tk.NORMAL)
 
         self.update_status(f"Displaying: {card_info['name']}", "green")
+
+    def display_card_image(self, card_info):
+        """Download and display the card image"""
+        try:
+            image_url = card_info.get('images', {}).get('small')
+            if not image_url:
+                self.card_image_label.config(image='', text="No image available")
+                return
+
+            # Download image
+            response = requests.get(image_url, timeout=10)
+            response.raise_for_status()
+
+            # Convert to PIL Image
+            image_data = BytesIO(response.content)
+            pil_image = Image.open(image_data)
+
+            # Resize to fit nicely (max height 400px)
+            max_height = 400
+            aspect_ratio = pil_image.width / pil_image.height
+            new_height = max_height
+            new_width = int(max_height * aspect_ratio)
+            pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+            # Convert to PhotoImage
+            photo = ImageTk.PhotoImage(pil_image)
+
+            # Update label
+            self.card_image_label.config(image=photo, text="")
+            self.card_image_label.image = photo  # Keep a reference
+
+        except Exception as e:
+            print(f"Error loading card image: {e}")
+            self.card_image_label.config(image='', text="Image load failed")
 
     def save_card_data(self):
         """Save the currently selected card data"""
@@ -383,7 +462,31 @@ class PokemonCardScannerApp:
         self.search_results = []
         self.selected_card = None
         self.save_btn.config(state=tk.DISABLED)
+        self.filter_entry.delete(0, tk.END)
         self.update_status("Results cleared", "orange")
+
+    def filter_results(self, event=None):
+        """Filter the search results based on filter text"""
+        if not self.search_results:
+            return
+
+        filter_text = self.filter_entry.get().lower()
+
+        # Clear current listbox
+        self.results_listbox.delete(0, tk.END)
+
+        # Rebuild listbox with filtered results
+        for card in self.search_results:
+            display_text = f"{card.name} - {card.set.name if hasattr(card, 'set') else 'Unknown'} ({card.id})"
+
+            # Check if filter matches
+            if filter_text in display_text.lower():
+                self.results_listbox.insert(tk.END, display_text)
+
+    def clear_filter(self):
+        """Clear the filter and show all results"""
+        self.filter_entry.delete(0, tk.END)
+        self.filter_results()
 
     def update_status(self, message: str, color: str = "black"):
         """
