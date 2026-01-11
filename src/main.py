@@ -74,7 +74,7 @@ class PokemonCardScannerApp:
         camera_label = ttk.Label(left_panel, text="Camera View", font=('Arial', 12, 'bold'))
         camera_label.pack(pady=(0, 5))
 
-        self.camera_canvas = tk.Canvas(left_panel, width=640, height=480, bg='black')
+        self.camera_canvas = tk.Canvas(left_panel, width=640, height=360, bg='black')
         self.camera_canvas.pack()
 
         # Camera controls
@@ -182,8 +182,8 @@ class PokemonCardScannerApp:
                 self.current_frame = frame
                 # Convert to RGB for display
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                # Resize to fit canvas
-                rgb_frame = cv2.resize(rgb_frame, (640, 480))
+                # Resize to fit canvas (16:9 aspect ratio)
+                rgb_frame = cv2.resize(rgb_frame, (640, 360))
                 # Convert to PIL Image
                 img = Image.fromarray(rgb_frame)
                 # Convert to ImageTk

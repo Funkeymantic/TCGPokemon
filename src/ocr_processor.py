@@ -25,11 +25,18 @@ class OCRProcessor:
                 r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
             ]
 
+            tesseract_found = False
             for path in possible_paths:
                 if os.path.exists(path):
                     pytesseract.pytesseract.tesseract_cmd = path
                     print(f"✓ Tesseract found at: {path}")
+                    tesseract_found = True
                     break
+
+            if not tesseract_found:
+                print("⚠ Tesseract not found in common locations.")
+                print("  Please install from: https://github.com/UB-Mannheim/tesseract/wiki")
+                print(f"  Checked paths: {possible_paths}")
 
     def extract_text(self, image: np.ndarray) -> str:
         """
