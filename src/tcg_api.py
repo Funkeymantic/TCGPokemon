@@ -4,6 +4,7 @@ Handles all interactions with the Pokemon TCG API
 """
 
 import os
+import time
 from typing import Optional, List, Dict, Any
 from pokemontcgsdk import Card, RestClient
 from dotenv import load_dotenv
@@ -23,71 +24,100 @@ class TCGAPIClient:
         else:
             print("⚠ No API key found. Using default rate limits.")
 
-    def search_card_by_name(self, card_name: str, set_name: Optional[str] = None) -> List[Card]:
+    def search_card_by_name(self, card_name: str, set_name: Optional[str] = None, max_retries: int = 3) -> List[Card]:
         """
         Search for cards by name and optionally by set
 
         Args:
             card_name: Name of the Pokemon card
             set_name: Optional set name to narrow search
+            max_retries: Maximum number of retries on timeout (default: 3)
 
         Returns:
             List of matching Card objects
         """
-        try:
-            query = f'name:"{card_name}"'
-            if set_name:
-                query += f' set.name:"{set_name}"'
+        query = f'name:"{card_name}"'
+        if set_name:
+            query += f' set.name:"{set_name}"'
 
-            print(f"Searching API with query: {query}")
-            cards = Card.where(q=query)
-            print(f"API returned response, converting to list...")
-
-            # Convert to list to handle SDK response properly
-            cards_list = list(cards) if cards else []
-            print(f"Found {len(cards_list)} cards")
-            return cards_list
-        except Exception as e:
-            # Better error handling for bytes/string errors
+        for attempt in range(max_retries):
             try:
-                error_msg = str(e)
-            except:
-                error_msg = repr(e)
-            print(f"Error searching for card: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            return []
+                print(f"Searching API with query: {query} (attempt {attempt + 1}/{max_retries})")
+                cards = Card.where(q=query)
+                print(f"API returned response, converting to list...")
 
-    def search_card_fuzzy(self, card_name: str) -> List[Card]:
+                # Convert to list to handle SDK response properly
+                cards_list = list(cards) if cards else []
+                print(f"Found {len(cards_list)} cards")
+                return cards_list
+            except Exception as e:
+                # Better error handling for bytes/string errors
+                try:
+                    error_msg = str(e)
+                except:
+                    error_msg = repr(e)
+
+                # Check if it's a timeout or server error
+                is_timeout = '504' in error_msg or 'timeout' in error_msg.lower()
+
+                if is_timeout and attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"API timeout. Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"Error searching for card: {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    return []
+
+        return []
+
+    def search_card_fuzzy(self, card_name: str, max_retries: int = 3) -> List[Card]:
         """
         Fuzzy search for cards (partial name matching)
 
         Args:
             card_name: Partial or full name of the Pokemon card
+            max_retries: Maximum number of retries on timeout (default: 3)
 
         Returns:
             List of matching Card objects
         """
-        try:
-            query = f'name:{card_name}*'
-            print(f"Fuzzy searching API with query: {query}")
-            cards = Card.where(q=query, pageSize=20)
-            print(f"API returned response, converting to list...")
+        query = f'name:{card_name}*'
 
-            # Convert to list to handle SDK response properly
-            cards_list = list(cards) if cards else []
-            print(f"Found {len(cards_list)} cards")
-            return cards_list
-        except Exception as e:
-            # Better error handling for bytes/string errors
+        for attempt in range(max_retries):
             try:
-                error_msg = str(e)
-            except:
-                error_msg = repr(e)
-            print(f"Error in fuzzy search: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            return []
+                print(f"Fuzzy searching API with query: {query} (attempt {attempt + 1}/{max_retries})")
+                cards = Card.where(q=query, pageSize=20)
+                print(f"API returned response, converting to list...")
+
+                # Convert to list to handle SDK response properly
+                cards_list = list(cards) if cards else []
+                print(f"Found {len(cards_list)} cards")
+                return cards_list
+            except Exception as e:
+                # Better error handling for bytes/string errors
+                try:
+                    error_msg = str(e)
+                except:
+                    error_msg = repr(e)
+
+                # Check if it's a timeout or server error
+                is_timeout = '504' in error_msg or 'timeout' in error_msg.lower() or '400' in error_msg
+
+                if is_timeout and attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"API error. Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"Error in fuzzy search: {error_msg}")
+                    import traceback
+                    traceback.print_exc()
+                    return []
+
+        return []
 
     def get_card_by_id(self, card_id: str) -> Optional[Card]:
         """
