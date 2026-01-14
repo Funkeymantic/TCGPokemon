@@ -9,7 +9,8 @@ import platform
 import pytesseract
 from PIL import Image
 import numpy as np
-from typing import List, Dict, Optional
+import cv2
+from typing import List, Dict, Optional, Tuple
 
 
 class OCRProcessor:
@@ -38,22 +39,197 @@ class OCRProcessor:
                 print("  Please install from: https://github.com/UB-Mannheim/tesseract/wiki")
                 print(f"  Checked paths: {possible_paths}")
 
-    def extract_text(self, image: np.ndarray) -> str:
+    def find_card_contour(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+        """
+        Find the largest rectangular contour in the image (card edges)
+
+        Args:
+            image: Input image as numpy array
+
+        Returns:
+            Tuple of (corners, area) or (None, 0) if not found
+        """
+        try:
+            # Convert to grayscale
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image.copy()
+
+            # Apply Gaussian blur to reduce noise
+            blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+            # Canny edge detection
+            edges = cv2.Canny(blurred, 50, 200)
+
+            # Dilate and erode to clean up edges
+            kernel = np.ones((5, 5), np.uint8)
+            edges = cv2.dilate(edges, kernel, iterations=2)
+            edges = cv2.erode(edges, kernel, iterations=1)
+
+            # Find contours
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            # Find biggest rectangular contour
+            biggest_contour = None
+            max_area = 0
+
+            for contour in contours:
+                area = cv2.contourArea(contour)
+
+                # Filter small contours (at least 5000 pixels)
+                if area > 5000:
+                    # Approximate contour to polygon
+                    perimeter = cv2.arcLength(contour, True)
+                    approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+
+                    # Check if it's a rectangle (4 corners)
+                    if len(approx) == 4 and area > max_area:
+                        biggest_contour = approx
+                        max_area = area
+
+            if biggest_contour is not None:
+                # Convert from shape (4, 1, 2) to (4, 2)
+                corners = biggest_contour.reshape(4, 2)
+                return corners, max_area
+
+            return None, 0
+
+        except Exception as e:
+            print(f"[OCR] Error finding card contour: {e}")
+            return None, 0
+
+    def reorder_corners(self, corners: np.ndarray) -> np.ndarray:
+        """
+        Reorder corners to [top-left, top-right, bottom-left, bottom-right]
+
+        Args:
+            corners: Array of 4 corner points
+
+        Returns:
+            Reordered corners array
+        """
+        # Reshape if needed
+        if corners.shape == (4, 1, 2):
+            corners = corners.reshape(4, 2)
+
+        # Initialize ordered points
+        ordered = np.zeros((4, 2), dtype=np.float32)
+
+        # Sum and difference of coordinates
+        s = corners.sum(axis=1)
+        diff = np.diff(corners, axis=1)
+
+        # Top-left has smallest sum
+        ordered[0] = corners[np.argmin(s)]
+        # Bottom-right has largest sum
+        ordered[3] = corners[np.argmax(s)]
+        # Top-right has smallest difference
+        ordered[1] = corners[np.argmin(diff)]
+        # Bottom-left has largest difference
+        ordered[2] = corners[np.argmax(diff)]
+
+        return ordered
+
+    def apply_perspective_transform(self, image: np.ndarray, corners: np.ndarray,
+                                   width: int = 500, height: int = 700) -> np.ndarray:
+        """
+        Apply perspective transformation to straighten card image
+
+        Args:
+            image: Input image
+            corners: 4 corner points in order [top-left, top-right, bottom-left, bottom-right]
+            width: Target width for transformed image
+            height: Target height for transformed image
+
+        Returns:
+            Transformed image
+        """
+        # Reorder corners
+        ordered_corners = self.reorder_corners(corners)
+
+        # Destination points for perspective transform
+        dst_points = np.array([
+            [0, 0],
+            [width - 1, 0],
+            [0, height - 1],
+            [width - 1, height - 1]
+        ], dtype=np.float32)
+
+        # Calculate perspective transform matrix
+        matrix = cv2.getPerspectiveTransform(ordered_corners, dst_points)
+
+        # Apply transformation
+        warped = cv2.warpPerspective(image, matrix, (width, height))
+
+        return warped
+
+    def preprocess_card_image(self, image: np.ndarray, debug: bool = False) -> Tuple[np.ndarray, bool]:
+        """
+        Preprocess card image by detecting edges and applying perspective transformation
+
+        Args:
+            image: Input image as numpy array
+            debug: If True, print debug information
+
+        Returns:
+            Tuple of (processed_image, was_transformed)
+            - processed_image: The transformed image (or original if transformation failed)
+            - was_transformed: True if perspective transformation was applied
+        """
+        try:
+            # Find card contour
+            corners, area = self.find_card_contour(image)
+
+            if corners is not None and area > 10000:  # Minimum area threshold
+                if debug:
+                    print(f"[OCR] Card detected! Area: {area:.0f} pixels")
+
+                # Calculate appropriate size based on aspect ratio
+                # Pokemon cards are approximately 2.5" x 3.5" (aspect ratio ~0.714)
+                height = 700
+                width = int(height * 0.714)
+
+                # Apply perspective transformation
+                transformed = self.apply_perspective_transform(image, corners, width, height)
+
+                if debug:
+                    print(f"[OCR] Applied perspective transformation ({width}x{height})")
+
+                return transformed, True
+            else:
+                if debug:
+                    print("[OCR] No card contour found, using original image")
+                return image, False
+
+        except Exception as e:
+            print(f"[OCR] Error in preprocessing: {e}")
+            return image, False
+
+    def extract_text(self, image: np.ndarray, use_preprocessing: bool = True) -> str:
         """
         Extract all text from an image
 
         Args:
             image: Image as numpy array
+            use_preprocessing: If True, apply perspective transformation before OCR
 
         Returns:
             Extracted text as string
         """
         try:
+            # Apply perspective transformation if enabled
+            processed_image = image
+            if use_preprocessing:
+                processed_image, was_transformed = self.preprocess_card_image(image, debug=True)
+                if was_transformed:
+                    print("[OCR] ✓ Card straightened with perspective transformation")
+
             # Convert to PIL Image if needed
-            if isinstance(image, np.ndarray):
-                pil_image = Image.fromarray(image)
+            if isinstance(processed_image, np.ndarray):
+                pil_image = Image.fromarray(processed_image)
             else:
-                pil_image = image
+                pil_image = processed_image
 
             # Try multiple PSM modes for better results
             # PSM 6: Assume a single uniform block of text
