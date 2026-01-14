@@ -98,13 +98,31 @@ class PokemonCardScannerApp:
         controls_frame = ttk.Frame(left_panel)
         controls_frame.pack(pady=10)
 
+        # Camera selection dropdown
+        camera_select_frame = ttk.Frame(controls_frame)
+        camera_select_frame.grid(row=0, column=0, columnspan=3, pady=(0, 5))
+
+        ttk.Label(camera_select_frame, text="Camera:").pack(side=tk.LEFT, padx=(0, 5))
+        self.camera_var = tk.StringVar()
+        self.camera_dropdown = ttk.Combobox(camera_select_frame, textvariable=self.camera_var,
+                                           width=15, state='readonly')
+        self.camera_dropdown.pack(side=tk.LEFT, padx=(0, 5))
+        self.camera_dropdown.bind('<<ComboboxSelected>>', self.on_camera_changed)
+
+        # Populate camera dropdown
+        self.refresh_cameras()
+
+        ttk.Button(camera_select_frame, text="Refresh", width=8,
+                  command=self.refresh_cameras).pack(side=tk.LEFT)
+
+        # Camera control buttons
         self.start_camera_btn = ttk.Button(controls_frame, text="Start Camera",
                                            command=self.toggle_camera)
-        self.start_camera_btn.grid(row=0, column=0, padx=5)
+        self.start_camera_btn.grid(row=1, column=0, padx=5, pady=(5, 0))
 
         self.capture_btn = ttk.Button(controls_frame, text="Capture & Scan",
                                       command=self.capture_and_scan, state=tk.DISABLED)
-        self.capture_btn.grid(row=0, column=1, padx=5)
+        self.capture_btn.grid(row=1, column=1, padx=5, pady=(5, 0))
 
         # Manual search
         search_frame = ttk.LabelFrame(left_panel, text="Manual Search", padding="10")
@@ -215,6 +233,51 @@ class PokemonCardScannerApp:
             self.capture_btn.config(state=tk.DISABLED)
             self.camera_canvas.delete("all")
             self.update_status("Camera stopped", "orange")
+
+    def refresh_cameras(self):
+        """Refresh the list of available cameras"""
+        self.update_status("Detecting cameras...", "blue")
+        available = CameraCapture.list_available_cameras()
+
+        if available:
+            camera_options = [f"Camera {i}" for i in available]
+            self.camera_dropdown['values'] = camera_options
+
+            # Select current camera or first available
+            if self.camera.camera_index in available:
+                self.camera_var.set(f"Camera {self.camera.camera_index}")
+            else:
+                self.camera_var.set(camera_options[0])
+                self.camera.camera_index = available[0]
+
+            self.update_status(f"Found {len(available)} camera(s)", "green")
+        else:
+            self.camera_dropdown['values'] = ["No cameras found"]
+            self.camera_var.set("No cameras found")
+            self.update_status("No cameras detected", "red")
+
+    def on_camera_changed(self, event):
+        """Handle camera selection change"""
+        selected = self.camera_var.get()
+
+        if "Camera" not in selected:
+            return
+
+        # Extract camera index from "Camera X"
+        try:
+            camera_index = int(selected.split()[-1])
+
+            if camera_index != self.camera.camera_index:
+                self.update_status(f"Switching to Camera {camera_index}...", "blue")
+
+                if self.camera.switch_camera(camera_index):
+                    self.update_status(f"Switched to Camera {camera_index}", "green")
+                else:
+                    self.update_status(f"Failed to switch camera", "red")
+                    messagebox.showerror("Error", f"Could not switch to Camera {camera_index}")
+
+        except (ValueError, IndexError) as e:
+            print(f"Error parsing camera index: {e}")
 
     def update_camera_feed(self):
         """Update the camera feed in the canvas"""

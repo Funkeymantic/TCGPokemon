@@ -5,7 +5,7 @@ Handles camera access and image capture for Pokemon card scanning
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from PIL import Image
 
 
@@ -22,6 +22,50 @@ class CameraCapture:
         self.camera_index = camera_index
         self.cap = None
         self.is_running = False
+
+    @staticmethod
+    def list_available_cameras(max_test: int = 10) -> List[int]:
+        """
+        List all available camera indices
+
+        Args:
+            max_test: Maximum number of camera indices to test (default: 10)
+
+        Returns:
+            List of available camera indices
+        """
+        available_cameras = []
+        for i in range(max_test):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                available_cameras.append(i)
+                cap.release()
+        return available_cameras
+
+    def switch_camera(self, camera_index: int) -> bool:
+        """
+        Switch to a different camera
+
+        Args:
+            camera_index: Index of the new camera
+
+        Returns:
+            True if switch was successful, False otherwise
+        """
+        was_running = self.is_running
+
+        # Stop current camera
+        if was_running:
+            self.stop()
+
+        # Update camera index
+        self.camera_index = camera_index
+
+        # Restart if it was running
+        if was_running:
+            return self.start()
+
+        return True
 
     def start(self) -> bool:
         """

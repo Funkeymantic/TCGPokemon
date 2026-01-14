@@ -5,7 +5,8 @@ A comprehensive Pokemon Trading Card Game (TCG) scanner that uses your camera to
 ## Features
 
 ### Core Scanning
-- 📷 **Camera Integration**: Real-time camera feed for scanning physical Pokemon cards
+- 📷 **Camera Integration**: Real-time camera feed for scanning physical Pokemon cards with multi-camera support
+- 🎯 **Perspective Transformation**: Automatically detects card edges and straightens tilted/angled cards before OCR
 - 🔍 **OCR Text Extraction**: Automatic text recognition from card images using Tesseract
 - 🌐 **TCG API Integration**: Fetches comprehensive card data from the official Pokemon TCG API
 - 💰 **Pricing Information**: Retrieves current market prices from TCGPlayer (USD) and Cardmarket (EUR)
@@ -13,6 +14,7 @@ A comprehensive Pokemon Trading Card Game (TCG) scanner that uses your camera to
 - 💾 **File Management**: Saves card data in multiple formats (JSON, TXT) with images
 - 🖥️ **Dual Interface**: Both GUI and command-line interfaces available
 - 🔎 **Manual Search**: Search for cards by name even without scanning
+- 🎥 **Camera Selection**: Choose from multiple connected cameras (webcam, phone, external cameras)
 
 ### 🧠 **Intelligent Learning System** (NEW!)
 - **Auto-Improving Accuracy**: Gets smarter with every scan
@@ -114,17 +116,20 @@ python src/main.py
 ```
 
 **GUI Features:**
-1. **Start Camera**: Begin camera feed
-2. **Capture & Scan**: Take a picture and automatically scan for card information
-3. **Manual Search**: Search for cards by typing the name
-4. **Learning Menu**:
+1. **Camera Selection**: Choose from available cameras using dropdown (webcam, phone via Iriun, external cameras)
+   - Use "Refresh" button to detect newly connected cameras
+2. **Start Camera**: Begin camera feed with automatic perspective correction
+3. **Capture & Scan**: Take a picture and automatically scan for card information
+   - Card edges are detected and image is straightened automatically
+4. **Manual Search**: Search for cards by typing the name
+5. **Learning Menu**:
    - **Build Card Cache**: One-time setup for fuzzy matching (RECOMMENDED!)
    - **View Statistics**: See success rate and learning progress
    - **Correct Last Scan**: Teach the system when OCR fails
-5. **View Results**: See all matching cards in the results list
-6. **Filter Results**: Search through results with the filter box
-7. **Select Card**: Click on a result to view detailed information and card image
-8. **Save Data**: Save all card information to files
+6. **View Results**: See all matching cards in the results list
+7. **Filter Results**: Search through results with the filter box
+8. **Select Card**: Click on a result to view detailed information and card image
+9. **Save Data**: Save all card information to files
 
 ### Command-Line Interface
 
