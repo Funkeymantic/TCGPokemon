@@ -16,7 +16,25 @@ A comprehensive Pokemon Trading Card Game (TCG) scanner that uses your camera to
 - 🔎 **Manual Search**: Search for cards by name even without scanning
 - 🎥 **Camera Selection**: Choose from multiple connected cameras (webcam, phone, external cameras)
 
-### 🧠 **Intelligent Learning System** (NEW!)
+### 🖼️ **Image Hash Matching** (NEW!)
+- **Perceptual Hashing**: Download card images and match by visual similarity
+- **Multi-Algorithm Matching**: Uses 4 different hash types (average, perceptual, difference, wavelet)
+- **Rotation Handling**: Detects cards in any orientation (0°, 90°, 180°, 270°)
+- **High Accuracy**: Visual matching works even when OCR fails completely
+- **Confidence Scoring**: Shows match confidence percentage (0-100%)
+- **SQLite Database**: Efficient storage of card hashes for fast lookup
+- **Bulk Download**: Download all Pokemon cards or set a custom limit
+
+### ✅ **Verification System** (NEW!)
+- **Pre-Search Verification**: Review detection results before searching
+- **Dual Detection Display**: Shows both OCR and image hash results side-by-side
+- **Smart Recommendations**: Suggests best action based on confidence levels
+- **One-Click Confirmation**: Confirm correct detections instantly
+- **Manual Correction**: Override detection with manual card name entry
+- **Retry Capture**: Quickly retake photo if detection fails
+- **Visual Preview**: See captured image while verifying
+
+### 🧠 **Intelligent Learning System**
 - **Auto-Improving Accuracy**: Gets smarter with every scan
 - **Card Name Caching**: Builds local database of Pokemon cards for instant fuzzy matching
 - **OCR Pattern Learning**: Remembers successful scans and reuses patterns
@@ -121,10 +139,18 @@ python src/main.py
 2. **Start Camera**: Begin camera feed with automatic perspective correction
 3. **Capture & Scan**: Take a picture and automatically scan for card information
    - Card edges are detected and image is straightened automatically
+   - **Verification Dialog** appears showing:
+     * Captured image preview
+     * OCR detection results with full text
+     * Image hash match results with confidence %
+     * Smart recommendations based on detection quality
+     * Options to Confirm, Correct manually, or Retry capture
 4. **Manual Search**: Search for cards by typing the name
 5. **Learning Menu**:
    - **Build Card Cache**: One-time setup for fuzzy matching (RECOMMENDED!)
+   - **Download Card Images**: Download Pokemon cards for image hash matching (NEW!)
    - **View Statistics**: See success rate and learning progress
+   - **Image Hash Statistics**: View image hash database stats (NEW!)
    - **Correct Last Scan**: Teach the system when OCR fails
 6. **View Results**: See all matching cards in the results list
 7. **Filter Results**: Search through results with the filter box

@@ -23,6 +23,8 @@ from tcg_api import TCGAPIClient
 from card_display import CardDisplay
 from file_manager import FileManager
 from learning_system import LearningSystem
+from image_hash_matcher import ImageHashMatcher
+from verification_dialog import show_verification_dialog
 
 
 class PokemonCardScannerApp:
@@ -45,6 +47,7 @@ class PokemonCardScannerApp:
         self.api = TCGAPIClient()
         self.file_manager = FileManager()
         self.learning = LearningSystem()
+        self.image_matcher = ImageHashMatcher()
 
         # State
         self.camera_running = False
@@ -52,6 +55,7 @@ class PokemonCardScannerApp:
         self.selected_card = None
         self.search_results = []
         self.last_ocr_text = None  # Track last OCR text for corrections
+        self.last_captured_image = None  # Track last captured image for verification
 
         # Setup UI
         self.setup_ui()
@@ -70,6 +74,9 @@ class PokemonCardScannerApp:
         menubar.add_cascade(label="Learning", menu=learning_menu)
         learning_menu.add_command(label="View Statistics", command=self.show_statistics)
         learning_menu.add_command(label="Build Card Cache", command=self.build_card_cache)
+        learning_menu.add_separator()
+        learning_menu.add_command(label="Download Card Images", command=self.download_card_images)
+        learning_menu.add_command(label="Image Hash Statistics", command=self.show_image_hash_stats)
         learning_menu.add_separator()
         learning_menu.add_command(label="Correct Last Scan", command=self.show_correction_dialog)
 
@@ -322,11 +329,15 @@ class PokemonCardScannerApp:
     def _process_captured_image(self, image):
         """
         Process captured image (runs in background thread)
+        Uses both OCR and image hash matching, then shows verification dialog
 
         Args:
             image: Captured image
         """
         try:
+            # Save image for verification
+            self.last_captured_image = image.copy()
+
             # Detect card region
             self.root.after(0, self.update_status, "Detecting card...", "blue")
             card_region = self.camera.detect_card_region(image)
@@ -338,7 +349,7 @@ class PokemonCardScannerApp:
             enhanced = self.camera.enhance_image(name_region)
 
             # Preprocess for OCR (improved preprocessing)
-            self.root.after(0, self.update_status, "Extracting text...", "blue")
+            self.root.after(0, self.update_status, "Extracting text (OCR)...", "blue")
             preprocessed = self.camera.preprocess_card_image(enhanced)
 
             # Extract text (with better Tesseract config)
@@ -348,13 +359,6 @@ class PokemonCardScannerApp:
             print(f"{text}")
             print(f"{'='*60}\n")
             self.last_ocr_text = text  # Save for potential corrections
-
-            if not text:
-                self.root.after(0, self.update_status, "No text detected", "orange")
-                self.root.after(0, messagebox.showwarning, "Warning",
-                              "Could not extract text from the image. Try adjusting the card position.")
-                self.learning.record_scan_stat('ocr', None, False)
-                return
 
             # Extract card info
             card_info = self.ocr.extract_pokemon_info(text)
@@ -367,51 +371,85 @@ class PokemonCardScannerApp:
                 learned_name = self.learning.get_learned_card_name(text)
                 if learned_name:
                     card_name = learned_name
-                    self.root.after(0, self.update_status, f"Using learned pattern: {card_name}", "blue")
+                    print(f"[Main] Using learned pattern: {card_name}")
 
             # Try fuzzy matching with cached cards
             if not card_name:
                 cache_size = self.learning.get_cache_size()
                 if cache_size > 0:
                     print(f"[Main] Trying fuzzy match with cache size: {cache_size}")
-                    matches = self.learning.fuzzy_match_card_name(text, threshold=0.3)  # Lower threshold
+                    matches = self.learning.fuzzy_match_card_name(text, threshold=0.3)
                     if matches:
-                        card_name = matches[0][0]  # Use best match
+                        card_name = matches[0][0]
                         confidence = matches[0][1]
                         print(f"[Main] Using fuzzy match: {card_name} ({confidence*100:.0f}%)")
-                        self.root.after(0, self.update_status,
-                                      f"Fuzzy match: {card_name} ({confidence*100:.0f}%)", "blue")
-                    else:
-                        print(f"[Main] No fuzzy matches found")
-                else:
-                    print(f"[Main] Card cache is empty - fuzzy matching unavailable")
 
-            if not card_name:
-                cache_size = self.learning.get_cache_size()
-                self.root.after(0, self.update_status, "Could not identify card name", "orange")
+            # Try image hash matching
+            self.root.after(0, self.update_status, "Matching image hash...", "blue")
+            image_match = self.image_matcher.match_card_image(card_region, threshold=15)
 
-                # Suggest building cache if it's empty
-                if cache_size == 0:
-                    msg = (f"Could not identify card name. OCR Text:\n{text[:200]}\n\n"
-                          "💡 TIP: Build the card cache first!\n"
-                          "Go to 'Learning > Build Card Cache' to enable smart fuzzy matching.\n\n"
-                          "Or use 'Learning > Correct Last Scan' to teach the system this card.")
-                else:
-                    msg = (f"Could not identify card name. OCR Text:\n{text[:200]}\n\n"
-                          f"Card cache has {cache_size} cards but no match found.\n"
-                          "Use 'Learning > Correct Last Scan' to teach the system.")
+            if image_match:
+                print(f"[Main] Image match found: {image_match['name']} ({image_match['confidence']:.1f}%)")
 
-                self.root.after(0, messagebox.showwarning, "Warning", msg)
-                self.learning.record_scan_stat('ocr', None, False)
-                return
-
-            # Search API
-            self.root.after(0, self.update_status, f"Searching for: {card_name}", "blue")
-            self._search_api(card_name, ocr_text=text)
+            # Show verification dialog
+            self.root.after(0, self.update_status, "Review detection results", "blue")
+            self.root.after(0, self._show_verification_dialog,
+                          card_region, text or "", card_name, image_match)
 
         except Exception as e:
             self.root.after(0, self.update_status, f"Error: {str(e)}", "red")
             self.root.after(0, messagebox.showerror, "Error", f"An error occurred: {str(e)}")
+
+    def _show_verification_dialog(self, image, ocr_text, ocr_card_name, image_match):
+        """
+        Show verification dialog with detection results
+
+        Args:
+            image: Captured card image
+            ocr_text: Full OCR text
+            ocr_card_name: Card name extracted from OCR
+            image_match: Image hash match results
+        """
+        show_verification_dialog(
+            self.root,
+            image,
+            ocr_text,
+            ocr_card_name,
+            image_match,
+            on_confirm=self._on_verification_confirm,
+            on_correct=self._on_verification_correct,
+            on_retry=self._on_verification_retry
+        )
+
+    def _on_verification_confirm(self, card_name: str, method: str):
+        """
+        Handle confirmation from verification dialog
+
+        Args:
+            card_name: Confirmed card name
+            method: Detection method used ('ocr' or 'image_hash')
+        """
+        print(f"[Main] Verification confirmed: {card_name} (method: {method})")
+        self.update_status(f"Searching for: {card_name}", "blue")
+
+        # Record scan stats
+        self.learning.record_scan_stat(method, card_name, True)
+
+        # Search API
+        threading.Thread(target=self._search_api,
+                        args=(card_name,),
+                        kwargs={'ocr_text': self.last_ocr_text},
+                        daemon=True).start()
+
+    def _on_verification_correct(self):
+        """Handle manual correction request from verification dialog"""
+        print("[Main] Manual correction requested")
+        self.show_correction_dialog()
+
+    def _on_verification_retry(self):
+        """Handle retry request from verification dialog"""
+        print("[Main] Retry capture requested")
+        self.update_status("Ready to capture again", "green")
 
     def manual_search(self):
         """Perform manual search using the search entry"""
@@ -702,6 +740,145 @@ class PokemonCardScannerApp:
         thread = threading.Thread(target=_build_cache)
         thread.daemon = True
         thread.start()
+
+    def download_card_images(self):
+        """Download all Pokemon card images and build perceptual hash database"""
+        stats = self.image_matcher.get_database_stats()
+        existing = stats.get('downloaded_cards', 0)
+
+        message = (f"This will download Pokemon card images from the API and create "
+                  f"a perceptual hash database for image-based matching.\n\n")
+
+        if existing > 0:
+            message += f"Current database: {existing} cards\n\n"
+
+        message += ("This process may take 30-60 minutes for all cards.\n"
+                   "You can limit the number of cards to download.\n\n"
+                   "Continue?")
+
+        if not messagebox.askyesno("Download Card Images", message):
+            return
+
+        # Ask for limit
+        limit_dialog = tk.Toplevel(self.root)
+        limit_dialog.title("Download Limit")
+        limit_dialog.geometry("350x150")
+        limit_dialog.transient(self.root)
+        limit_dialog.grab_set()
+
+        ttk.Label(limit_dialog, text="Number of cards to download:",
+                 font=('Arial', 10)).pack(pady=(20, 5))
+
+        limit_var = tk.StringVar(value="500")
+        limit_entry = ttk.Entry(limit_dialog, textvariable=limit_var, width=15)
+        limit_entry.pack(pady=5)
+
+        ttk.Label(limit_dialog, text="(0 = download all cards)",
+                 font=('Arial', 9), foreground='gray').pack()
+
+        def start_download():
+            try:
+                max_cards = int(limit_var.get())
+            except:
+                max_cards = 500
+
+            limit_dialog.destroy()
+            self._start_card_download(max_cards)
+
+        ttk.Button(limit_dialog, text="Start Download",
+                  command=start_download).pack(pady=10)
+
+        # Center dialog
+        limit_dialog.update_idletasks()
+        x = (limit_dialog.winfo_screenwidth() // 2) - (350 // 2)
+        y = (limit_dialog.winfo_screenheight() // 2) - (150 // 2)
+        limit_dialog.geometry(f"+{x}+{y}")
+
+    def _start_card_download(self, max_cards: int):
+        """Start downloading cards in background with progress"""
+        # Create progress dialog
+        progress_window = tk.Toplevel(self.root)
+        progress_window.title("Downloading Cards")
+        progress_window.geometry("500x200")
+        progress_window.transient(self.root)
+
+        ttk.Label(progress_window, text="Downloading Pokemon Card Images",
+                 font=('Arial', 12, 'bold')).pack(pady=10)
+
+        progress_var = tk.StringVar(value="Initializing...")
+        progress_label = ttk.Label(progress_window, textvariable=progress_var,
+                                   font=('Arial', 10))
+        progress_label.pack(pady=5)
+
+        progress_bar = ttk.Progressbar(progress_window, length=400, mode='determinate')
+        progress_bar.pack(pady=20)
+
+        card_label = ttk.Label(progress_window, text="", font=('Arial', 9),
+                              foreground='gray')
+        card_label.pack()
+
+        # Center window
+        progress_window.update_idletasks()
+        x = (progress_window.winfo_screenwidth() // 2) - (500 // 2)
+        y = (progress_window.winfo_screenheight() // 2) - (200 // 2)
+        progress_window.geometry(f"+{x}+{y}")
+
+        self.update_status("Downloading card images...", "blue")
+
+        def progress_callback(current, total, card_name):
+            progress = int((current / total) * 100)
+            progress_var.set(f"Progress: {current}/{total} cards ({progress}%)")
+            progress_bar['value'] = progress
+            card_label.config(text=f"Current: {card_name}")
+
+        def download_thread():
+            try:
+                downloaded = self.image_matcher.download_all_cards(
+                    max_cards=max_cards,
+                    callback=lambda c, t, n: self.root.after(0, progress_callback, c, t, n)
+                )
+
+                self.root.after(0, progress_window.destroy)
+                self.root.after(0, self.update_status,
+                              f"Downloaded {downloaded} cards", "green")
+                self.root.after(0, messagebox.showinfo, "Success",
+                              f"Successfully downloaded and hashed {downloaded} cards!\n\n"
+                              f"The scanner will now use image matching for better accuracy.")
+
+            except Exception as e:
+                self.root.after(0, progress_window.destroy)
+                self.root.after(0, self.update_status, "Download failed", "red")
+                self.root.after(0, messagebox.showerror, "Error",
+                              f"Failed to download cards: {str(e)}")
+
+        thread = threading.Thread(target=download_thread)
+        thread.daemon = True
+        thread.start()
+
+    def show_image_hash_stats(self):
+        """Show image hash database statistics"""
+        stats = self.image_matcher.get_database_stats()
+
+        total = stats.get('total_cards', 0)
+        downloaded = stats.get('downloaded_cards', 0)
+        sets = stats.get('total_sets', 0)
+        db_path = stats.get('database_path', 'Unknown')
+
+        message = f"""Image Hash Database Statistics:
+
+Total Cards: {total}
+Downloaded Cards: {downloaded}
+Total Sets: {sets}
+
+Database Path: {db_path}
+
+Status: {'✓ Ready' if downloaded > 0 else '❌ No cards downloaded'}
+"""
+
+        if downloaded == 0:
+            message += "\n💡 Use 'Download Card Images' to build the database."
+
+        messagebox.showinfo("Image Hash Statistics", message)
 
     def show_correction_dialog(self):
         """Show dialog to correct the last OCR scan"""
