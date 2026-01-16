@@ -56,6 +56,7 @@ class PokemonCardScannerApp:
         self.search_results = []
         self.last_ocr_text = None  # Track last OCR text for corrections
         self.last_captured_image = None  # Track last captured image for verification
+        self.available_cameras = []  # Track available cameras with their names
 
         # Setup UI
         self.setup_ui()
@@ -247,44 +248,61 @@ class PokemonCardScannerApp:
         available = CameraCapture.list_available_cameras()
 
         if available:
-            camera_options = [f"Camera {i}" for i in available]
+            # Store camera info for later lookup
+            self.available_cameras = available
+
+            # Create dropdown options with camera names
+            camera_options = [cam['name'] for cam in available]
             self.camera_dropdown['values'] = camera_options
 
             # Select current camera or first available
-            if self.camera.camera_index in available:
-                self.camera_var.set(f"Camera {self.camera.camera_index}")
+            current_camera = None
+            for cam in available:
+                if cam['index'] == self.camera.camera_index:
+                    current_camera = cam
+                    break
+
+            if current_camera:
+                self.camera_var.set(current_camera['name'])
             else:
                 self.camera_var.set(camera_options[0])
-                self.camera.camera_index = available[0]
+                self.camera.camera_index = available[0]['index']
 
             self.update_status(f"Found {len(available)} camera(s)", "green")
         else:
+            self.available_cameras = []
             self.camera_dropdown['values'] = ["No cameras found"]
             self.camera_var.set("No cameras found")
             self.update_status("No cameras detected", "red")
 
     def on_camera_changed(self, event):
         """Handle camera selection change"""
-        selected = self.camera_var.get()
+        selected_name = self.camera_var.get()
 
-        if "Camera" not in selected:
+        if not selected_name or selected_name == "No cameras found":
             return
 
-        # Extract camera index from "Camera X"
-        try:
-            camera_index = int(selected.split()[-1])
+        # Find the camera by name
+        selected_camera = None
+        for cam in self.available_cameras:
+            if cam['name'] == selected_name:
+                selected_camera = cam
+                break
 
-            if camera_index != self.camera.camera_index:
-                self.update_status(f"Switching to Camera {camera_index}...", "blue")
+        if not selected_camera:
+            return
 
-                if self.camera.switch_camera(camera_index):
-                    self.update_status(f"Switched to Camera {camera_index}", "green")
-                else:
-                    self.update_status(f"Failed to switch camera", "red")
-                    messagebox.showerror("Error", f"Could not switch to Camera {camera_index}")
+        camera_index = selected_camera['index']
 
-        except (ValueError, IndexError) as e:
-            print(f"Error parsing camera index: {e}")
+        # Switch if different from current
+        if camera_index != self.camera.camera_index:
+            self.update_status(f"Switching to {selected_name}...", "blue")
+
+            if self.camera.switch_camera(camera_index):
+                self.update_status(f"Switched to {selected_name}", "green")
+            else:
+                self.update_status(f"Failed to switch camera", "red")
+                messagebox.showerror("Error", f"Could not switch to {selected_name}")
 
     def update_camera_feed(self):
         """Update the camera feed in the canvas"""

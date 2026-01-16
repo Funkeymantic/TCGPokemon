@@ -5,7 +5,7 @@ Handles camera access and image capture for Pokemon card scanning
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 from PIL import Image
 
 
@@ -24,23 +24,92 @@ class CameraCapture:
         self.is_running = False
 
     @staticmethod
-    def list_available_cameras(max_test: int = 10) -> List[int]:
+    def list_available_cameras(max_test: int = 10) -> List[Dict]:
         """
-        List all available camera indices
+        List all available cameras with their names
 
         Args:
             max_test: Maximum number of camera indices to test (default: 10)
 
         Returns:
-            List of available camera indices
+            List of dictionaries with 'index' and 'name' keys
         """
         available_cameras = []
+
         for i in range(max_test):
             cap = cv2.VideoCapture(i)
             if cap.isOpened():
-                available_cameras.append(i)
+                # Try to get camera name/description
+                name = CameraCapture._get_camera_name(i, cap)
+                available_cameras.append({
+                    'index': i,
+                    'name': name
+                })
                 cap.release()
+
         return available_cameras
+
+    @staticmethod
+    def _get_camera_name(index: int, cap: cv2.VideoCapture) -> str:
+        """
+        Get a descriptive name for a camera
+
+        Args:
+            index: Camera index
+            cap: OpenCV VideoCapture object
+
+        Returns:
+            Descriptive camera name
+        """
+        # Try to get backend name
+        backend = cap.getBackendName() if hasattr(cap, 'getBackendName') else None
+
+        # Get basic camera properties to help identify it
+        width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+
+        # Try platform-specific methods to get camera name
+        try:
+            import platform
+            if platform.system() == 'Windows':
+                # On Windows, try to get camera name from registry/WMI
+                camera_name = CameraCapture._get_windows_camera_name(index)
+                if camera_name:
+                    return camera_name
+        except:
+            pass
+
+        # Build descriptive name based on what we know
+        if index == 0:
+            return f"Camera 0 - Built-in ({int(width)}x{int(height)})"
+        else:
+            return f"Camera {index} - External ({int(width)}x{int(height)})"
+
+    @staticmethod
+    def _get_windows_camera_name(index: int) -> Optional[str]:
+        """
+        Get camera name on Windows using WMI
+
+        Args:
+            index: Camera index
+
+        Returns:
+            Camera name or None if not found
+        """
+        try:
+            import subprocess
+            # Use PowerShell to get camera names
+            cmd = 'powershell "Get-PnpDevice -Class Camera | Select-Object -Property FriendlyName | Format-Table -HideTableHeaders"'
+            result = subprocess.run(cmd, capture_output=True, text=True, shell=True, timeout=2)
+
+            if result.returncode == 0:
+                lines = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+                if 0 <= index < len(lines):
+                    return lines[index]
+        except:
+            pass
+
+        return None
 
     def switch_camera(self, camera_index: int) -> bool:
         """
