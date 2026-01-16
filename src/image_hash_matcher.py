@@ -14,7 +14,7 @@ from io import BytesIO
 from typing import List, Tuple, Optional, Dict
 import imagehash
 import threading
-from tcg_api import TCGAPIClient
+from pokemontcgsdk import Card
 
 
 class ImageHashMatcher:
@@ -28,7 +28,6 @@ class ImageHashMatcher:
             db_path: Path to SQLite database for storing hashes
         """
         self.db_path = db_path
-        self.api = TCGAPIClient()
         self.lock = threading.Lock()
 
         # Create database directory if it doesn't exist
@@ -95,30 +94,36 @@ class ImageHashMatcher:
         print("[ImageHash] Starting card download from Pokemon TCG API...")
 
         try:
-            # Get all cards from API
+            # Get all cards from API using pokemontcgsdk
             all_cards = []
             page = 1
             page_size = 250
 
             while True:
                 print(f"[ImageHash] Fetching page {page}...")
-                response = self.api.search_cards("", page=page, page_size=page_size)
 
-                if not response or 'data' not in response:
-                    break
+                try:
+                    # Use Card.where() with pagination
+                    cards = Card.where(page=page, pageSize=page_size)
+                    cards_list = list(cards) if cards else []
 
-                cards = response['data']
-                if not cards:
-                    break
+                    if not cards_list:
+                        print("[ImageHash] No more cards to fetch")
+                        break
 
-                all_cards.extend(cards)
-                print(f"[ImageHash] Retrieved {len(all_cards)} cards so far...")
+                    all_cards.extend(cards_list)
+                    print(f"[ImageHash] Retrieved {len(all_cards)} cards so far...")
 
-                page += 1
+                    page += 1
 
-                # Limit if requested
-                if max_cards > 0 and len(all_cards) >= max_cards:
-                    all_cards = all_cards[:max_cards]
+                    # Limit if requested
+                    if max_cards > 0 and len(all_cards) >= max_cards:
+                        all_cards = all_cards[:max_cards]
+                        print(f"[ImageHash] Reached limit of {max_cards} cards")
+                        break
+
+                except Exception as e:
+                    print(f"[ImageHash] Error fetching page {page}: {e}")
                     break
 
             print(f"[ImageHash] Total cards to process: {len(all_cards)}")
@@ -127,8 +132,11 @@ class ImageHashMatcher:
             downloaded = 0
             for idx, card in enumerate(all_cards, 1):
                 try:
+                    # Get card name - Card objects have .name attribute
+                    card_name = card.name if hasattr(card, 'name') else 'Unknown'
+
                     if callback:
-                        callback(idx, len(all_cards), card.get('name', 'Unknown'))
+                        callback(idx, len(all_cards), card_name)
 
                     if self._download_and_hash_card(card):
                         downloaded += 1
@@ -137,7 +145,8 @@ class ImageHashMatcher:
                         print(f"[ImageHash] Progress: {idx}/{len(all_cards)} cards processed")
 
                 except Exception as e:
-                    print(f"[ImageHash] Error processing card {card.get('name', 'Unknown')}: {e}")
+                    card_name = card.name if hasattr(card, 'name') else 'Unknown'
+                    print(f"[ImageHash] Error processing card {card_name}: {e}")
                     continue
 
             print(f"[ImageHash] ✓ Downloaded and hashed {downloaded} cards")
@@ -145,25 +154,37 @@ class ImageHashMatcher:
 
         except Exception as e:
             print(f"[ImageHash] Error downloading cards: {e}")
+            import traceback
+            traceback.print_exc()
             return 0
 
-    def _download_and_hash_card(self, card: Dict) -> bool:
+    def _download_and_hash_card(self, card) -> bool:
         """
         Download a single card image and compute its hashes
 
         Args:
-            card: Card data from API
+            card: Card object from pokemontcgsdk
 
         Returns:
             True if successful, False otherwise
         """
         try:
-            card_id = card.get('id')
-            card_name = card.get('name')
-            images = card.get('images', {})
+            # Card objects have attributes, not dict methods
+            card_id = card.id if hasattr(card, 'id') else None
+            card_name = card.name if hasattr(card, 'name') else 'Unknown'
+
+            if not card_id:
+                print(f"[ImageHash] No card ID for {card_name}")
+                return False
+
+            # Get images from card object
+            images = card.images if hasattr(card, 'images') else None
+            if not images:
+                print(f"[ImageHash] No images for {card_name}")
+                return False
 
             # Get high-res image URL
-            image_url = images.get('large') or images.get('small')
+            image_url = getattr(images, 'large', None) or getattr(images, 'small', None)
             if not image_url:
                 print(f"[ImageHash] No image URL for {card_name}")
                 return False
@@ -191,7 +212,13 @@ class ImageHashMatcher:
                 with sqlite3.connect(self.db_path) as conn:
                     cursor = conn.cursor()
 
-                    set_info = card.get('set', {})
+                    # Get set info from card object
+                    set_obj = card.set if hasattr(card, 'set') else None
+                    set_name = getattr(set_obj, 'name', None) if set_obj else None
+                    set_id = getattr(set_obj, 'id', None) if set_obj else None
+
+                    card_number = card.number if hasattr(card, 'number') else None
+                    card_rarity = card.rarity if hasattr(card, 'rarity') else None
 
                     cursor.execute('''
                         INSERT OR REPLACE INTO card_hashes
@@ -204,10 +231,10 @@ class ImageHashMatcher:
                     ''', (
                         card_id,
                         card_name,
-                        set_info.get('name'),
-                        set_info.get('id'),
-                        card.get('number'),
-                        card.get('rarity'),
+                        set_name,
+                        set_id,
+                        card_number,
+                        card_rarity,
                         image_url,
                         str(hashes['avg_hash']),
                         str(hashes['p_hash']),
