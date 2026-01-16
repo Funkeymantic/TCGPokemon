@@ -116,9 +116,6 @@ class PokemonCardScannerApp:
         self.camera_dropdown.pack(side=tk.LEFT, padx=(0, 5))
         self.camera_dropdown.bind('<<ComboboxSelected>>', self.on_camera_changed)
 
-        # Populate camera dropdown
-        self.refresh_cameras()
-
         ttk.Button(camera_select_frame, text="Refresh", width=8,
                   command=self.refresh_cameras).pack(side=tk.LEFT)
 
@@ -220,6 +217,9 @@ class PokemonCardScannerApp:
         self.clear_btn = ttk.Button(action_frame, text="Clear Results",
                                     command=self.clear_results)
         self.clear_btn.grid(row=0, column=1, padx=5)
+
+        # Populate camera dropdown after all UI elements are created
+        self.refresh_cameras()
 
     def toggle_camera(self):
         """Start or stop the camera"""
